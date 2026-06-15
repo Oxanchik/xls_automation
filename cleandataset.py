@@ -40,13 +40,14 @@ def arrange_and_format_file(input_file, output_file):
     ws = wb.active
 
     # Estilos
-    header_font = Font(name='Arial', size=10, bold=True)
-    body_font = Font(name='Arial', size=10)
+    # header_font = Font(name='Arial', size=10, bold=True)
+    header_font = Font(bold=True) # dejamos fuente de base (normalmente es Calibri 11pt)
     gray_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
+    # body_font = Font(name='Arial', size=10)
 
-    # Aplicar fuente a TODO el documento de una vez (mucho más rápido)
     # Nota: openpyxl no permite aplicar fuente a todo el rango directamente de forma eficiente
     # sin iterar, PERO podemos optimizar iterando solo por columnas, no por celdas individuales.
+    # Al final para economizar la memoria no voy a aplicar body_font, lo quito del código
 
     max_col = ws.max_column
     max_row = ws.max_row
