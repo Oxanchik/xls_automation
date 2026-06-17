@@ -1,10 +1,14 @@
 # main.py
 import sys
 import os
-import cleandataset
+
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
+
+import cleandataset
+import movement_fit
+import loss_by_batch
 
 
 def get_file_paths_interactive():
@@ -80,10 +84,13 @@ def main():
         # 1. Limpiar y Formatear
         cleandataset.arrange_and_format_file(input_path, output_path)
 
-        # 2. Analizar Uso de Materia Prima (Nuevo paso)
-        # Usamos el mismo archivo output_path como entrada y salida (se modifica in-place)
-        import movement_fit
+        # 2. Analizar Uso de Materia Prima
+        # Usamos el mismo archivo output_path como entrada y salida
         movement_fit.analyze_material_usage(output_path, output_path)
+
+        # 3. Analizar las mermas en cada lote de PT
+        # Usamos el mismo archivo output_path como entrada y salida
+        loss_by_batch.analyze_loss_by_batch(output_path, output_path)
 
         print("\n✅ Proceso COMPLETO terminado (Limpieza + Análisis MP)!")
         print(f"💾 Archivo final: {output_path}")
