@@ -1,8 +1,8 @@
 import pandas as pd
-import os
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+
+import os
 
 
 def find_column(df, target_name):
@@ -20,6 +20,8 @@ def find_column(df, target_name):
 
 def analyze_material_usage(input_file, output_file):
     print(f"🔍 Iniciando análisis de uso de materia prima en: {os.path.basename(input_file)}")
+
+    carpeta_base = os.path.dirname(os.path.abspath(input_file))
 
     # 1. Cargar datos
     df = pd.read_excel(input_file, engine="openpyxl", dtype={'CodigoArticulo': str, 'Partida': str})
@@ -134,60 +136,121 @@ def analyze_material_usage(input_file, output_file):
         "Comentario"
     ]].copy()
 
-    # 6. Ordenar por Producto Terminado y luego por Materia Prima
-    final_table.sort_values(by=['CodigoArticulo_PT', 'Partida_PT', 'CodigoArticulo_MP', 'Partida_MP'], inplace=True)
+    # --- AGREGAR PESO NOMINAL ---
 
-    # 7. Guardar en Excel
-    print("Guardando hoja 'uso_MP' en el Excel...")
-    wb = load_workbook(output_file)
+    # A. Cargar el archivo de pesos
+    pesos_file = os.path.join(carpeta_base, "Lista_pesos.xlsx")
 
-    # Eliminar hoja si existe para evitar duplicados
-    if "uso_MP" in wb.sheetnames:
-        del wb["uso_MP"]
+    if not os.path.exists(pesos_file):
+        print(f"❌ Error: No se encuentra el archivo de pesos '{pesos_file}' en la carpeta actual.")
+        return
 
-    ws = wb.create_sheet("uso_MP")
+    try:
+        df_pesos = pd.read_excel(
+            pesos_file,
+            sheet_name="PT_UDS",
+            dtype={'CodigoArticulo': str, 'Peso_nominal_kg': float}  # Forzar tipos correctos
+        )
+        # Limpiar nombres de columnas por seguridad
+        df_pesos.columns = df_pesos.columns.str.strip()
 
-    # 8. Escribir cabeceras manualmente (para tener control total)
-    ws.append(final_table.columns.tolist())
+        # Validar columnas en archivo de pesos
+        if 'CodigoArticulo' not in df_pesos.columns or 'Peso_nominal_kg' not in df_pesos.columns:
+            print("❌ Error: El archivo de pesos no tiene las columnas 'CodigoArticulo' o 'Peso_nominal_kg'.")
+            return
 
-    # 9. Escribir datos fila por fila directamente desde el DataFrame
-    # iterrows() o itertuples() son más eficientes que dataframe_to_rows para escritura directa
-    for row in final_table.itertuples(index=False, name=None):
-        # name=None evita crear NamedTuples, devuelve tuplas simples, más seguro para openpyxl
-        ws.append(row)
+    except Exception as e:
+        print(f"❌ Error al leer el archivo de pesos: {e}")
+        return
 
-    # Al añadir name=None, fuerzas a pandas a devolver tuplas estándar en lugar de NamedTuples.
-    # Esto evita errores si tus columnas tienen espacios, guiones o caracteres especiales (ej. "Unidad Medida"), ya que NamedTuple intentaría crear atributos inválidos en Python. ws.append funciona perfecto con tuplas estándar.
+    # B. Fusionar con la tabla final
+    # Unimos usando CodigoArticulo_PT del resultado y CodigoArticulo de la lista de pesos
+    final_table = pd.merge(
+        final_table,
+        df_pesos[['CodigoArticulo', 'Peso_nominal_kg']],
+        left_on='CodigoArticulo_PT',
+        right_on='CodigoArticulo',
+        how='left'
+    )
 
-    # 10. Estilos
-    header_font = Font(bold=True) # Fuente predeterminada (Calibri) en negrita
-    gray_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
+    # Renombrar para que quede limpio y eliminar la columna duplicada de código
+    final_table.rename(columns={'Peso_nominal_kg': 'Peso_nominal'}, inplace=True)
+    final_table.drop(columns=['CodigoArticulo'], inplace=True)
 
-    # 11. Obtener dimensiones reales tras escribir los datos
-    max_col = ws.max_column
-    max_row = ws.max_row # No lo necesitamos para la cabecera, pero sí para anchos
+    # C. Reordenar columnas para poner 'Peso_nominal' justo después de 'UnidadMedida_PT'
+    columnas_ordenadas = [
+        "CodigoArticulo_PT",
+        "Partida_PT",
+        "DescripcionArticulo_PT",
+        "Unidades_PT",
+        "UnidadMedida_PT",
+        "Peso_nominal",  # Nueva columna insertada aquí
+        "CodigoArticulo_MP",
+        "Partida_MP",
+        "DescripcionArticulo_MP",
+        "Unidades_MP",
+        "UnidadMedida_MP",
+        "Comentario"
+    ]
 
-    # 12. Aplicar formato SOLO a la cabecera (Fila 1)
-    # Iteramos solo por las columnas existentes
-    for col_idx in range(1, max_col + 1):
-        cell = ws.cell(row=1, column=col_idx)
-        cell.font = header_font
-        cell.fill = gray_fill
+    # Asegurar que todas las columnas existan antes de reordenar
+    columnas_finales = [c for c in columnas_ordenadas if c in final_table.columns]
+    final_table = final_table[columnas_finales]
 
-    # 13. Ajuste de anchos
-    print("Ajustando anchos de columna...")
-    for col_idx in range(1, max_col + 1):
-        max_length = 0
-        for row_idx in range(1, max_row + 1):
-            val = ws.cell(row=row_idx, column=col_idx).value
-            if val:
-                length = len(str(val))
-                if length > max_length:
-                    max_length = length
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_length + 2, 50)
+    # 6. Guardar en nueva hoja "uso_MP"
+    try:
+        # 1. Abrir el escritor (esto carga el libro si mode='a')
+        with pd.ExcelWriter(output_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
 
-    wb.save(output_file)
-    print(f"✅ Hoja 'uso_MP' creada exitosamente con {len(final_table)} registros.")
+            # --- FASE A: ESCRITURA RÁPIDA DE DATOS ---
+            final_table.to_excel(writer, sheet_name="uso_MP", index=False)
+
+            # --- FASE B: FORMATEO CON OPENPYXL ---
+            # Accedemos directamente al objeto workbook y worksheet que pandas acaba de crear/modificar
+            # workbook = writer.book
+            worksheet = writer.sheets["uso_MP"]
+
+            # Definir estilos (Azul Excel #4472C4, Texto Blanco, Negrita)
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            header_alignment = Alignment(horizontal="center")
+
+            # 1. Formatear Cabecera (Fila 1)
+            for cell in worksheet[1]:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+
+            # 2. Ajustar anchos de columna automáticamente (basado en el contenido)
+            # Iteramos sobre las columnas del DataFrame para calcular el ancho ideal
+            for i, col in enumerate(final_table.columns):
+                # Calcular longitud máxima: entre la cabecera y el dato más largo
+                # Rellenar NaN con cadena vacía antes de convertir a string y medir
+                data_series = final_table[col].fillna('').astype(str).map(len)
+                max_val = data_series.max()
+
+                # Asegurar que es un entero (por si la serie estuviera vacía)
+                max_data_len = int(max_val) if pd.notna(max_val) else 0
+                header_len = len(col)
+
+                max_len = max(max_data_len, header_len) + 2 # + 2 es un margen de seguridad
+
+                # Limitar ancho máximo para que no sea ridículo (ej. 50 caracteres)
+                col_width = min(max_len, 50)
+
+                col_letter = get_column_letter(i + 1)  # Convierte 1 -> 'A', 2 -> 'B', etc.
+                worksheet.column_dimensions[col_letter].width = col_width
+
+            # 3. Ejemplo: Formato condicional o específico para la columna 'Peso_nominal'
+            # Supongamos que 'Peso_nominal' es la columna F (índice 5)
+            # Podrías aplicar formato de número aquí si fuera necesario
+
+        print(f"✅ Hoja 'uso_MP' creada y formateada exitosamente con {len(final_table)} registros.")
+
+    except PermissionError:
+        print("❌ Error: No se pudo guardar. Asegúrate de que el archivo Excel esté CERRADO.")
+    except Exception as e:
+        print(f"❌ Error crítico: {e}")
 
 
 if __name__ == '__main__':
