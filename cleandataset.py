@@ -41,7 +41,7 @@ def arrange_and_format_file(input_file, output_file):
 
     # Estilos
     # header_font = Font(name='Arial', size=10, bold=True)
-    header_font = Font(bold=True) # dejamos fuente de base (normalmente es Calibri 11pt)
+    header_font = Font(bold=True) # dejamos fuente de base (normalmente es Calibri)
     gray_fill = PatternFill(start_color='D9D9D9', end_color='D9D9D9', fill_type='solid')
     # body_font = Font(name='Arial', size=10)
 
